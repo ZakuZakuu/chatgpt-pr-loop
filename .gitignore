@@ -1,0 +1,21 @@
+# Local PR-loop state and dry-run output
+*pr-loop-state*.json
+dry-run/
+
+# Python cache and local tooling
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Local secrets and environment files
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+
+# Editor and OS files
+.DS_Store
+.vscode/
+.idea/
