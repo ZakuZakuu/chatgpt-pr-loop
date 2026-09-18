@@ -5,6 +5,9 @@ from datetime import datetime,timezone
 from pathlib import Path
 URL=re.compile(r"^https://chatgpt\.com/c/[A-Za-z0-9_-]+(?:\?.*)?$")
 SHA=re.compile(r"^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$")
+def logical_name(workspace,generation,summary):
+    summary=(summary or "continued work").strip()
+    return f"{workspace} · {generation} · {summary}"
 def now(): return datetime.now(timezone.utc).isoformat().replace("+00:00","Z")
 def url(v):
     if not URL.fullmatch(v.strip()): raise SystemExit("invalid ChatGPT conversation URL")
@@ -31,7 +34,7 @@ def main(a):
         if p.exists(): raise SystemExit("registry already exists; use work or handoff")
         t=now(); v={"schema":1,"workspaceName":a.workspace_name,
           "active":{"generation":"G01","url":url(a.url),
-          "logicalName":a.logical_name or a.workspace_name+" - G01","summary":a.summary,
+          "logicalName":a.logical_name or logical_name(a.workspace_name,"G01",a.summary),"summary":a.summary,
           "createdAt":t,"updatedAt":t},"previous":[],"work":work(a),
           "history":[{"at":t,"event":"BOUND_EXISTING_CONVERSATION","generation":"G01"}]}
         save(p,v); print(json.dumps({"ok":True,"registry":v},indent=2,sort_keys=True)); return
@@ -46,9 +49,10 @@ def main(a):
             v["history"].append({"at":now(),"event":"HANDOFF_FAILED","generation":v["active"]["generation"]})
             save(p,v); print(json.dumps({"ok":True,"swapped":False,"registry":v},indent=2)); return
         old=v["active"]; g="G"+str(int(old["generation"][1:])+1).zfill(2); t=now(); v["previous"].append(old)
+        summary=a.summary or old.get("summary") or "continued work"
         v["active"]={"generation":g,"url":url(a.url),
-          "logicalName":a.logical_name or v["workspaceName"]+" - "+g,
-          "summary":a.summary or old.get("summary"),"createdAt":t,"updatedAt":t}
+          "logicalName":a.logical_name or logical_name(v["workspaceName"],g,summary),
+          "summary":summary,"createdAt":t,"updatedAt":t}
         v["history"].append({"at":t,"event":"HANDOFF_SUCCEEDED","from":old["generation"],"to":g})
     save(p,v); print(json.dumps({"ok":True,"registry":v},indent=2,sort_keys=True))
 def parser():

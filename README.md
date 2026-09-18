@@ -31,11 +31,22 @@ Record evidence and request review:
     python3 scripts/pr_loop.py --state /tmp/pr-loop.json \
       request-review --ci PASS --ci-summary '<required checks>'
 
+If an existing PLAN already reviewed the exact adopted HEAD, take it over explicitly without recording a second review:
+
+    python3 scripts/pr_loop.py --state /tmp/pr-loop.json \
+      adopt-existing-review --reviewed-sha <current-head-sha> --decision PLAN \
+      --summary '<existing blocker>'
+    python3 scripts/pr_loop.py --state /tmp/pr-loop.json start-fix
+
+Use `--ci NOT_REQUIRED` when the repository has no required GitHub CI checks. `PASS` and `NOT_REQUIRED` satisfy the merge gate; `FAIL`, `PENDING`, and `UNKNOWN` do not. All evidence remains bound to the exact HEAD SHA.
+
 Send the returned PR, HEAD_SHA, TESTS, and CI fields through the existing C2C envelope. Record the ChatGPT result only with the exact REVIEWED_SHA. A PLAN continues the fix loop. A fresh DONE plus same-HEAD green evidence produces MERGE_READY; this project does not auto-merge.
 
 Conversation lineage is stored per workspace at:
 
     ~/.codex/chatgpt-pr-loop/<workspace>/state.json
+
+The default logical name is `<workspace> · G<NN> · <short summary>`. Binding starts G01 with the supplied summary; a successful handoff creates the next generation with its new summary. Updating the PR or moving between PRs does not increment the generation.
 
 Bind an existing ChatGPT URL to G01, update work across PRs without changing generation, and use the registry handoff command only after a new conversation has acknowledged the structured handoff. Failed handoff keeps the old active URL.
 

@@ -20,6 +20,7 @@ MCP workspace access, a C2C bridge, a tunnel, OAuth pairing, and a doctor check 
 Use a user-level registry at ~/.codex/chatgpt-pr-loop/<workspace>/state.json. It stores one active conversation and retained previous generations:
 
 - active generation, URL, logical name, summary, and timestamps
+- default logical name `<workspace> · G<NN> · <short summary>`
 - previous[] for retained history
 - current workspace, PR, exact HEAD, phase, tests, CI, and next action
 - append-only local history
@@ -36,11 +37,11 @@ HANDOFF and BLOCKED are side states. Adopt an existing PR and existing remote HE
 
 Every iteration records PR number, full remote HEAD SHA, test result, and CI result. Test and CI records are bound to that exact HEAD. A same-HEAD refresh preserves review, tests, and CI. A changed push, rebase, amend, or force-push clears all three and returns to TESTING.
 
-A review is accepted only from AWAITING_REVIEW and only when REVIEWED_SHA equals current remote HEAD SHA. PLAN means fix, test, push, reread HEAD, and review again. DONE means the review is complete, not that merge is allowed. Merge readiness requires fresh DONE, PASS tests for the same HEAD, required CI PASS for the same HEAD, and the correct phase. This skill stops at MERGE_READY; merging is a separate explicitly authorized action.
+A normal review is accepted only from AWAITING_REVIEW and only when REVIEWED_SHA equals current remote HEAD SHA. An existing PLAN may be adopted through the separate `adopt-existing-review` command when its exact REVIEWED_SHA equals the adopted current HEAD; that path enters CHANGES_REQUESTED directly and does not weaken the normal `record-review` phase invariant. PLAN means fix, test, push, reread HEAD, and review again. DONE means the review is complete, not that merge is allowed. Merge readiness requires fresh DONE, PASS tests for the same HEAD, and either required CI PASS or explicit NOT_REQUIRED for the same HEAD. FAIL, PENDING, and UNKNOWN never satisfy the gate. This skill stops at MERGE_READY; merging is a separate explicitly authorized action.
 
 ## Procedure
 
-1. Adopt the current PR, workspace, existing plan, and current remote HEAD.
+1. Adopt the current PR, workspace, existing plan, and current remote HEAD. If an existing PLAN already has REVIEWED_SHA equal to that HEAD, use `adopt-existing-review` and continue at CHANGES_REQUESTED instead of requesting a duplicate review.
 2. Implement or continue the requested work, run tests, and record evidence.
 3. Commit and push; reread the exact remote HEAD.
 4. Ask ChatGPT to review the GitHub PR at that exact SHA using the GitHub app/connector.
@@ -69,6 +70,7 @@ The scripts are dependency-free and do not contact GitHub, push, merge, or send 
     python3 scripts/pr_loop.py --state /tmp/pr-state.json adopt --pr 17 --head <full-sha> --workspace . --workspace-name demo
     python3 scripts/pr_loop.py --state /tmp/pr-state.json record-tests --status PASS --command '<tests>'
     python3 scripts/pr_loop.py --state /tmp/pr-state.json request-review --ci PASS
+    python3 scripts/pr_loop.py --state /tmp/pr-state.json adopt-existing-review --reviewed-sha <full-sha> --decision PLAN
     python3 scripts/pr_loop.py --state /tmp/pr-state.json record-review --head <full-sha> --decision DONE
     python3 scripts/pr_loop.py --state /tmp/pr-state.json merge-ready
 
