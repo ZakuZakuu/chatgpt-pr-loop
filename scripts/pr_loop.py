@@ -32,7 +32,7 @@ def load(path):
     if not path.is_file():
         fail("state file does not exist: " + str(path))
     value = json.loads(path.read_text(encoding="utf-8"))
-    if value.get("schema") != 1:
+    if value.get("schema") != 2:
         fail("unsupported state schema")
     return value
 
@@ -54,13 +54,13 @@ def fresh(state):
 
 def new_state(args):
     return {
-        "schema": 1,
+        "schema": 2,
         "workspace": {"path": str(Path(args.workspace).resolve()), "name": args.workspace_name},
         "pr": {"number": int(args.pr), "url": args.url, "ref": args.ref},
         "head": {"sha": sha(args.head)},
         "phase": "IMPLEMENTING",
-        "tests": {"status": "UNKNOWN", "command": None, "summary": None, "recordedAt": None},
-        "ci": {"status": "UNKNOWN", "summary": None, "recordedAt": None},
+        "tests": {"status": "UNKNOWN", "headSha": None, "command": None, "summary": None, "recordedAt": None},
+        "ci": {"status": "UNKNOWN", "headSha": None, "summary": None, "recordedAt": None},
         "review": None,
         "handoff": None,
         "history": [{"at": stamp(), "event": "ADOPTED"}],
@@ -76,13 +76,14 @@ def review_sha_is_current(state, reviewed):
     return reviewed == state["head"]["sha"]
 
 def set_tests(state, status, command=None, summary=None):
-    state["tests"] = {"status": status.upper(), "command": command,
-                      "summary": summary, "recordedAt": stamp()}
+    state["tests"] = {"status": status.upper(), "headSha": state["head"]["sha"],
+                      "command": command, "summary": summary, "recordedAt": stamp()}
     state["phase"] = "TESTING"
     event(state, "TESTS_RECORDED", status=state["tests"]["status"])
 
 def set_ci(state, status, summary=None):
-    state["ci"] = {"status": status.upper(), "summary": summary, "recordedAt": stamp()}
+    state["ci"] = {"status": status.upper(), "headSha": state["head"]["sha"],
+                   "summary": summary, "recordedAt": stamp()}
     event(state, "CI_RECORDED", status=state["ci"]["status"])
 
 def apply_head(state, new):
@@ -93,13 +94,17 @@ def apply_head(state, new):
         return False
     state["head"] = {"sha": new}
     state["review"] = None
-    state["tests"] = {"status": "UNKNOWN", "command": None, "summary": None, "recordedAt": None}
-    state["ci"] = {"status": "UNKNOWN", "summary": None, "recordedAt": None}
+    state["tests"] = {"status": "UNKNOWN", "headSha": None, "command": None, "summary": None, "recordedAt": None}
+    state["ci"] = {"status": "UNKNOWN", "headSha": None, "summary": None, "recordedAt": None}
     state["phase"] = "TESTING"
     event(state, "HEAD_CHANGED", oldHeadSha=old, headSha=new)
     return True
 
 def apply_review(state, reviewed, decision, summary=None):
+    if state["phase"] != "AWAITING_REVIEW":
+        raise ValueError("record-review requires AWAITING_REVIEW")
+    if reviewed != state["head"]["sha"]:
+        raise ValueError("stale review: " + reviewed + "; current HEAD is " + state["head"]["sha"])
     decision = normalize_decision(decision)
     state["review"] = {"decision": decision, "reviewedSha": reviewed,
                        "summary": summary or "NONE", "recordedAt": stamp()}
@@ -139,10 +144,10 @@ def resume_state(state, current_head):
 
 def gate_reasons(state):
     reasons = []
-    if state["tests"]["status"] != "PASS":
-        reasons.append("tests are not PASS")
-    if state["ci"]["status"] != "PASS":
-        reasons.append("CI is not PASS")
+    if state["tests"]["status"] != "PASS" or state["tests"].get("headSha") != state["head"]["sha"]:
+        reasons.append("tests are not PASS for current HEAD")
+    if state["ci"]["status"] != "PASS" or state["ci"].get("headSha") != state["head"]["sha"]:
+        reasons.append("CI is not PASS for current HEAD")
     if not fresh(state):
         reasons.append("review SHA or decision is stale")
     if state["phase"] in {"BLOCKED", "HANDOFF", "MERGED"}:
@@ -188,8 +193,8 @@ def cmd_ci(a):
     emit({"ok": True, "state": value})
 
 def request_review_state(state, ci_status="PENDING", ci_summary=None):
-    if state["tests"]["status"] != "PASS":
-        raise ValueError("tests must be PASS before review")
+    if state["tests"]["status"] != "PASS" or state["tests"]["headSha"] != state["head"]["sha"]:
+        raise ValueError("tests must be PASS for current HEAD before review")
     ci_status = ci_status.upper()
     if ci_status not in {"PASS", "FAIL", "PENDING", "UNKNOWN"}:
         raise ValueError("CI status must be PASS, FAIL, PENDING, or UNKNOWN")
@@ -302,8 +307,8 @@ def cmd_dry(a):
 
     apply_head(value, new)
     checks.append({"name": "changed_head_invalidates_state",
-                   "pass": value["review"] is None and value["tests"]["status"] == "UNKNOWN"
-                   and value["ci"]["status"] == "UNKNOWN"})
+                   "pass": value["review"] is None and value["tests"]["status"] == "UNKNOWN" and value["tests"]["headSha"] is None
+                   and value["ci"]["status"] == "UNKNOWN" and value["ci"]["headSha"] is None})
     checks.append({"name": "stale_review_rejected",
                    "pass": not review_sha_is_current(value, old)})
 
@@ -314,8 +319,8 @@ def cmd_dry(a):
     set_ci(value, "FAIL", "intentional CI failure")
     allowed, reasons = run_gate(value)
     checks.append({"name": "gate_rejects_failed_checks",
-                   "pass": not allowed and "tests are not PASS" in reasons
-                   and "CI is not PASS" in reasons})
+                   "pass": not allowed and "tests are not PASS for current HEAD" in reasons
+                   and "CI is not PASS for current HEAD" in reasons})
 
     set_tests(value, "PASS", "fake-tests", "green")
     set_ci(value, "PASS", "green")
@@ -343,7 +348,7 @@ def parser():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--state", required=True)
     sub = parser.add_subparsers(dest="cmd", required=True)
-    init = sub.add_parser("init")
+    init = sub.add_parser("init", aliases=["adopt"])
     init.add_argument("--pr", required=True)
     init.add_argument("--head", required=True)
     init.add_argument("--workspace", default=".")

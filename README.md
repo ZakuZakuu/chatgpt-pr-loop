@@ -1,50 +1,47 @@
 # chatgpt-pr-loop
 
-chatgpt-pr-loop is a PR workflow layer for the original codex-with-chatgpt skill. It adopts an existing pull request and runs:
+chatgpt-pr-loop is a small PR workflow layer for codex-with-chatgpt v2. It coordinates:
 
-implement/test -> push -> ChatGPT review -> fix -> rereview -> merge gate
+    Codex implement/test -> push/update PR -> ChatGPT review -> fix -> rereview -> merge gate
 
-The original C2C skill remains responsible for IAB, MCP workspace access, long-chat continuity, checkpoints, and HANDOFF/new-chat takeover. This project is responsible only for PR adoption, exact HEAD verification, the review/fix loop, and the merge gate.
+The upstream C2C layer remains responsible for IAB messaging, long-chat continuity, checkpoints, and HANDOFF transport. This project owns PR adoption, exact remote SHA verification, test and CI evidence, the review/fix loop, and the merge gate.
 
-It uses the original C2C protocol (EXECUTED, PLAN, DONE, BLOCKED, and HANDOFF). It does not define a second PR-specific message protocol.
+The control plane is Codex to one active Web ChatGPT conversation. The data plane is the GitHub repository and PR. MCP workspace access, a bridge, a tunnel, OAuth pairing, and doctor checks are optional integrations, not workflow prerequisites. Formal review uses the GitHub repository and exact PR HEAD.
 
-## Installation
+## Install
 
-Copy this directory to the user skill directory:
+Copy this directory to:
 
-~/.codex/skills/chatgpt-pr-loop/
+    ~/.codex/skills/chatgpt-pr-loop/
 
-No package installation or additional runtime dependency is required.
+No package or additional runtime dependency is needed.
 
-## Basic use
+## Use
 
-Keep the state file outside the repository when practical. Adopt the current HEAD of an existing PR:
+Adopt an existing PR:
 
-    python3 scripts/pr_loop.py --state /path/to/pr-loop-state.json init \
-      --pr 123 \
-      --head <full-40-or-64-character-head-sha> \
-      --workspace /path/to/workspace \
-      --workspace-name my-workspace \
-      --ref feature/my-pr
+    python3 scripts/pr_loop.py --state /tmp/pr-loop.json adopt \
+      --pr 123 --head <full-40-or-64-character-sha> \
+      --workspace /path/to/workspace --workspace-name my-workspace --ref feature
 
-Record tests and CI, then produce supplemental metadata for the original C2C EXECUTED review request:
+Record evidence and request review:
 
-    python3 scripts/pr_loop.py --state /path/to/pr-loop-state.json \
-      record-tests --status PASS --command "<test command>" --summary "<summary>"
-    python3 scripts/pr_loop.py --state /path/to/pr-loop-state.json \
-      request-review --ci PENDING --ci-summary "<summary>"
+    python3 scripts/pr_loop.py --state /tmp/pr-loop.json \
+      record-tests --status PASS --command '<test command>' --summary '<result>'
+    python3 scripts/pr_loop.py --state /tmp/pr-loop.json \
+      request-review --ci PASS --ci-summary '<required checks>'
 
-Pass the returned PR, HEAD_SHA, TESTS, and CI metadata to the original C2C skill. Record ChatGPT's PLAN, DONE, or BLOCKED result with its exact REVIEWED_SHA. A changed HEAD invalidates the review; confirming the same HEAD preserves it.
+Send the returned PR, HEAD_SHA, TESTS, and CI fields through the existing C2C envelope. Record the ChatGPT result only with the exact REVIEWED_SHA. A PLAN continues the fix loop. A fresh DONE plus same-HEAD green evidence produces MERGE_READY; this project does not auto-merge.
 
-Run the dependency-free local validation before installation:
+Conversation lineage is stored per workspace at:
 
-    python3 scripts/pr_loop.py --state dry-run/pr-loop-state.json dry-run
+    ~/.codex/chatgpt-pr-loop/<workspace>/state.json
 
-The helper never contacts GitHub, pushes, merges, or sends ChatGPT messages. Those actions remain explicit workflow steps owned by the surrounding agent and the original C2C transport.
+Bind an existing ChatGPT URL to G01, update work across PRs without changing generation, and use the registry handoff command only after a new conversation has acknowledged the structured handoff. Failed handoff keeps the old active URL.
 
-## Layout
+## Validation
 
-- SKILL.md - workflow instructions
-- agents/openai.yaml - skill metadata
-- references/state-schema.md - local state contract
-- scripts/pr_loop.py - dependency-free state machine and merge gate
+    python3 -m unittest discover -s tests -v
+    python3 scripts/pr_loop.py --state /tmp/pr-loop-dry.json dry-run
+
+The scripts are dependency-free and have no network, push, merge, or ChatGPT side effects.

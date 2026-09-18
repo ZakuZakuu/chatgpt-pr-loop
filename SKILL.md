@@ -1,78 +1,80 @@
 ---
 name: chatgpt-pr-loop
-description: Run a SHA-verified Codex implement, test, PR review, fix, rereview, and merge loop over the existing codex-with-chatgpt transport.
+description: Run a SHA-verified PR implement, test, review, fix, rereview, and merge-gate workflow over one active Web ChatGPT conversation.
 ---
 
-# ChatGPT PR Loop
+# ChatGPT PR Loop v2
 
-Use this skill only for PR workflow. The original codex-with-chatgpt skill remains the owner of IAB, ChatGPT/MCP transport, pairing, long-chat or Project selection, checkpoints, HANDOFF, and new-chat takeover.
+This is the PR workflow layer. It does not replace or edit the upstream codex-with-chatgpt skill.
 
-Do not edit the original C2C SKILL.md, protocol, connector, or message grammar. This skill owns only PR adoption, test/review records, fix iterations, and the merge gate.
+## Boundaries
 
-## Invariants
+The control plane is one local Codex session talking to one active Web ChatGPT conversation through the existing IAB transport. The data plane is the GitHub repository and pull request. GitHub is the formal source for the PR diff, remote branch, exact HEAD, checks, and review.
 
-- Adopt the named existing PR in place. Do not create a replacement PR unless asked.
-- Record the PR number, URL, branch, exact remote HEAD SHA, tests, and CI before review.
-- Every review request and result contains PR number, HEAD SHA, test result, and CI result.
-- A review is valid only when its reviewed SHA exactly equals the current PR HEAD, represented by a complete 40 or 64 hexadecimal SHA. Any changed push, force-push, rebase, or amended commit clears the review.
-- Re-confirming the same HEAD is a no-op for review, tests, and CI. It must not invalidate a valid review.
-- ChatGPT PLAN means Codex fixes, tests, pushes, and requests review again. It is not a user blocker.
-- ChatGPT DONE is not enough to merge. Current tests, required CI, and repository/user merge policy must pass.
-- Never put credentials, cookies, pairing codes, or temporary tunnel URLs in state or ChatGPT messages.
-- Stop for product decisions, permission changes, missing credentials, merge-policy ambiguity, or genuine blockers. Do not stop for routine review fixes.
-- Do not merge without explicit merge authorization.
+The upstream C2C skill owns IAB message transport, long-chat continuity, checkpoints, and HANDOFF/new-chat transport. This skill owns PR adoption, SHA verification, test and CI evidence, the review/fix loop, conversation lineage metadata, and the local merge gate.
 
-## State machine
+MCP workspace access, a C2C bridge, a tunnel, OAuth pairing, and a doctor check are optional integrations. Their absence must not prevent local PR state work or GitHub-based review. Do not modify upstream C2C.
 
-Read references/state-schema.md for the JSON shape.
+## Conversation lineage
 
-IMPLEMENTING -> TESTING -> AWAITING_REVIEW -> CHANGES_REQUESTED -> FIXING -> TESTING -> AWAITING_REVIEW -> REVIEWED -> MERGE_READY -> MERGED.
+Use a user-level registry at ~/.codex/chatgpt-pr-loop/<workspace>/state.json. It stores one active conversation and retained previous generations:
 
-HANDOFF and BLOCKED are side states. A changed HEAD resets the phase to TESTING, clears review, and clears test/CI records. Re-confirming the same HEAD preserves all of them. MERGE_READY is only a gate result; it does not merge.
+- active generation, URL, logical name, summary, and timestamps
+- previous[] for retained history
+- current workspace, PR, exact HEAD, phase, tests, CI, and next action
+- append-only local history
+
+Bind an existing URL with scripts/conversation_registry.py bind; this starts G01 and does not require a new chat. Update work when moving between PRs without changing generation. A successful HANDOFF creates the next generation only after the new URL exists, the structured handoff is sent, and the new conversation acknowledges the current workspace and task. A failed handoff leaves the old active URL unchanged.
+
+The default is one Codex session and one active Web ChatGPT conversation. A generation may cover multiple tasks and PRs. Create a new generation only for a long, lost, stale, or explicitly replaced conversation.
+
+## PR state and invariants
+
+IMPLEMENTING -> TESTING -> AWAITING_REVIEW -> CHANGES_REQUESTED -> FIXING -> TESTING -> AWAITING_REVIEW -> REVIEWED -> MERGE_READY.
+
+HANDOFF and BLOCKED are side states. Adopt an existing PR and existing remote HEAD; do not create a replacement PR during takeover.
+
+Every iteration records PR number, full remote HEAD SHA, test result, and CI result. Test and CI records are bound to that exact HEAD. A same-HEAD refresh preserves review, tests, and CI. A changed push, rebase, amend, or force-push clears all three and returns to TESTING.
+
+A review is accepted only from AWAITING_REVIEW and only when REVIEWED_SHA equals current remote HEAD SHA. PLAN means fix, test, push, reread HEAD, and review again. DONE means the review is complete, not that merge is allowed. Merge readiness requires fresh DONE, PASS tests for the same HEAD, required CI PASS for the same HEAD, and the correct phase. This skill stops at MERGE_READY; merging is a separate explicitly authorized action.
 
 ## Procedure
 
-1. Adopt the named PR without changing unrelated branches or opening a new PR.
-2. Implement and test. Record the command, status, and concise summary.
-3. Push/update the existing PR and re-read the remote HEAD.
-4. Ask ChatGPT, through the existing C2C connector, to review that exact PR HEAD through MCP.
-5. Validate the returned SHA locally. Reject stale reviews.
-6. For PLAN, fix, retest, push, record the new HEAD, and repeat.
-7. For DONE, refresh HEAD, tests, and required CI before the merge gate.
-8. If long-chat is too long or lost, invoke the original C2C HANDOFF. Carry PR number, current HEAD, phase, tests/CI, review SHA, and next action only. The new chat re-reads the current PR and workspace.
-9. Merge only after the gate passes and authorization is clear.
+1. Adopt the current PR, workspace, existing plan, and current remote HEAD.
+2. Implement or continue the requested work, run tests, and record evidence.
+3. Commit and push; reread the exact remote HEAD.
+4. Ask ChatGPT to review the GitHub PR at that exact SHA using the GitHub app/connector.
+5. Record PLAN, DONE, or BLOCKED with REVIEWED_SHA and comments. Reject stale SHA or wrong-phase results.
+6. For PLAN, continue fixing without asking the user, then repeat from step 2.
+7. For DONE, refresh remote HEAD and evidence, then run the local merge gate.
+8. If the conversation is too long or unavailable, use the upstream C2C HANDOFF envelope with PR, full HEAD, phase, tests, CI, review SHA, and next action. Swap the registry URL only after successful takeover.
+9. Stop for product decisions, permissions, missing authorization, or genuine blockers.
 
-## C2C message layer
+## Message contract
 
-The original C2C skill owns the complete message envelope and grammar. Do not make this helper generate a parallel protocol or a complete C2C message.
-
-For a review request, provide these supplemental metadata fields to the original C2C EXECUTED state:
+Use the upstream C2C envelope and its existing states: EXECUTED, PLAN, DONE, BLOCKED, and HANDOFF. This skill adds only review metadata:
 
 - PR number
 - exact HEAD_SHA
 - TESTS status, command, and summary
 - CI status and summary
-- request to review this exact HEAD
+- request for GitHub review of that exact remote HEAD
 
-ChatGPT returns through the original protocol:
+A review result carries REVIEWED_SHA, decision, test/CI observations, and concise comments. Do not invent a second message grammar.
 
-- PLAN: changes are requested; Codex continues the fix loop.
-- DONE: review approval is complete; the local merge gate still runs.
-- BLOCKED: a real blocker requires user attention.
-- Include REVIEWED_SHA, test/CI observations, and concise comments as payload fields.
+## Commands
 
-For a long-chat transition, provide PR number, current HEAD, phase, tests/CI, review SHA, and next action to the original C2C HANDOFF. The original C2C skill is responsible for [C2C] STATE: EXECUTED, [C2C] STATE: HANDOFF, ORIGINAL_GOAL, PROGRESS, CURRENT_STATE, KNOWN_ISSUES, and NEXT_EXPECTED_STEP.
+The scripts are dependency-free and do not contact GitHub, push, merge, or send messages:
 
-The local helper is authoritative for SHA freshness and the merge gate. ChatGPT prose is not.
+    python3 scripts/pr_loop.py --state /tmp/pr-state.json adopt --pr 17 --head <full-sha> --workspace . --workspace-name demo
+    python3 scripts/pr_loop.py --state /tmp/pr-state.json record-tests --status PASS --command '<tests>'
+    python3 scripts/pr_loop.py --state /tmp/pr-state.json request-review --ci PASS
+    python3 scripts/pr_loop.py --state /tmp/pr-state.json record-review --head <full-sha> --decision DONE
+    python3 scripts/pr_loop.py --state /tmp/pr-state.json merge-ready
 
-## Handoff and helper
+Validate with:
 
-Keep PR-loop state separate from C2C checkpoint/session state. A HANDOFF preserves PR number, current HEAD, phase, tests/CI, review SHA, and next action, but never diffs, file bodies, credentials, or tunnel URLs. On resume, fetch the PR HEAD again; a changed SHA invalidates the review.
+    python3 -m unittest discover -s tests -v
+    python3 scripts/pr_loop.py --state /tmp/pr-loop-dry.json dry-run
 
-scripts/pr_loop.py is dependency-free and never calls GitHub, pushes, merges, or sends messages. Use an explicit state path:
-
-~~~text
-python3 scripts/pr_loop.py --state dry-run/pr-loop-state.json dry-run
-~~~
-
-The dry-run executes the same transition helpers used by the CLI: PLAN -> FIXING, changed-HEAD invalidation, same-HEAD preservation, stale/failing gate rejection, fresh DONE approval, HANDOFF -> resume, and final gate success. Run it before wiring this workflow to a real PR.
+Never store credentials, cookies, pairing codes, OAuth data, tunnel hosts, or full local secret configuration in repository state.
