@@ -50,6 +50,19 @@ The default logical name is `<workspace> · G<NN> · <short summary>`. Binding s
 
 Bind an existing ChatGPT URL to G01, update work across PRs without changing generation, and use the registry handoff command only after a new conversation has acknowledged the structured handoff. Failed handoff keeps the old active URL.
 
+## IAB recovery
+
+If ChatGPT remains visible but Codex loses browser control (for example `nodeRepl.fetch request failed` after sleep/resume), treat it as a stale IAB runtime/handle before treating it as a lost conversation:
+
+- preserve the active conversation URL and current PR/HEAD state;
+- do not HANDOFF, increment generation, rebuild MCP/tunnels, or create a new GPT conversation;
+- abandon the stale handle, acquire a fresh IAB browser/tab, and open the exact stored conversation URL;
+- check whether the pending exact-HEAD request is already present before resending it;
+- continue the same review loop once the fresh tab is controllable;
+- ask for a Desktop restart or manual relay only after fresh-tab recovery also fails.
+
+Opening the same conversation in a fresh tab is transport recovery, not a new conversation generation.
+
 ## Validation
 
     python3 -m unittest discover -s tests -v
