@@ -51,6 +51,25 @@ A normal review is accepted only from AWAITING_REVIEW and only when REVIEWED_SHA
 8. If the conversation is too long or unavailable, use the upstream C2C HANDOFF envelope with PR, full HEAD, phase, tests, CI, review SHA, and next action. Swap the registry URL only after successful takeover.
 9. Stop for product decisions, permissions, missing authorization, or genuine blockers.
 
+## IAB/browser runtime recovery
+
+Treat browser-control failure separately from conversation failure. A visible ChatGPT page with errors such as `nodeRepl.fetch request failed`, a stale browser handle, or a tab-control timeout may happen after sleep/resume or desktop runtime churn. It does not by itself mean that the active ChatGPT conversation is lost.
+
+Before asking the user to refresh, restart Desktop, create a new conversation, or repair MCP/C2C infrastructure, perform this bounded recovery:
+
+1. Preserve the current workspace registry, active conversation URL, generation, PR number, exact HEAD SHA, tests, CI, review state, and pending action. Do not change PR phase because of an IAB outage.
+2. Do not HANDOFF and do not increment G<NN>. Opening the same conversation URL in a fresh browser or tab is still the same conversation generation.
+3. Stop retrying a known-stale browser/tab handle. Reacquire IAB; if needed, create a fresh IAB browser/tab and navigate directly to the registry's exact active conversation URL.
+4. Verify that the fresh tab is on the expected ChatGPT conversation and that the page/composer is controllable. Prefer the stored conversation URL over search, history guessing, or creating a new chat.
+5. Before sending anything, determine whether the pending exact-HEAD request was already submitted:
+   - if submission definitely never happened, send it once;
+   - if submission status is uncertain, inspect the reopened conversation for the task/PR/HEAD marker first;
+   - if the request is already present, do not send a duplicate.
+6. Continue the existing review loop from the preserved state. Do not recreate connectors, rebuild tunnels, rerun unrelated work, open a replacement PR, or invalidate same-HEAD evidence.
+7. Only if a fresh IAB handle/tab opened on the exact existing conversation URL still cannot be controlled should the workflow fall back to one user-assisted Desktop restart/manual relay. Do not repeatedly ask the user to refresh or restart without first trying the fresh-tab recovery.
+
+A browser runtime outage is a transport incident, not a reason to abandon the active GPT conversation. Conversation rollover is reserved for genuine context/URL failure under the normal HANDOFF rules.
+
 ## Message contract
 
 Use the upstream C2C envelope and its existing states: EXECUTED, PLAN, DONE, BLOCKED, and HANDOFF. This skill adds only review metadata:
