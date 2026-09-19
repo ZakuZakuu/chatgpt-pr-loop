@@ -1,26 +1,33 @@
 # State schema
 
-This JSON is local PR metadata, not GitHub state or C2C session state. Never store credentials, cookies, pairing codes, or temporary tunnel URLs.
+pr_loop.py stores local PR metadata. It is separate from C2C session state and never stores credentials, cookies, pairing codes, OAuth data, or temporary tunnel hosts.
 
-Fields:
-- schema: 1
-- workspace: path and name
-- pr: number, URL, ref
-- head: current exact 40 or 64 character SHA
+## PR state
+
+- schema: 2
+- workspace: name and local path
+- pr: number, URL, and ref
+- head.sha: current exact 40 or 64 character remote HEAD
 - phase: IMPLEMENTING, TESTING, AWAITING_REVIEW, CHANGES_REQUESTED, FIXING, REVIEWED, MERGE_READY, MERGED, HANDOFF, or BLOCKED
-- tests: status, command, summary, recordedAt
-- ci: status, summary, recordedAt
-- review: null or decision PLAN, DONE, or BLOCKED; reviewedSha, summary, recordedAt
-- handoff: null or previousPhase, nextAction, PR/HEAD/test/CI metadata
+- tests: status, headSha, command, summary, timestamp
+- ci: status (`PASS`, `NOT_REQUIRED`, `FAIL`, `PENDING`, or `UNKNOWN`), headSha, summary, timestamp
+- review: decision, reviewedSha, summary, timestamp, or null
+- handoff: previous phase, next action, PR, HEAD, review, tests, and CI snapshot
 - history: append-only local events
 
-A review is fresh only when review.reviewedSha equals head.sha and decision is DONE. A changed HEAD clears review, tests, and CI; confirming the same HEAD preserves them. record-review accepts a result only from AWAITING_REVIEW.
+Test, CI, and review evidence is fresh only for the current head.sha. Confirming the same HEAD preserves existing records. Changing HEAD clears review, test evidence, and CI evidence.
 
-Merge requires all of:
-- head.sha equals review.reviewedSha
-- review decision is DONE
-- tests.status is PASS
-- ci.status is PASS
-- phase is not BLOCKED, HANDOFF, or MERGED
+The merge gate requires current-head tests PASS, current-head CI `PASS` or `NOT_REQUIRED`, review decision DONE, reviewedSha equal to head.sha, and phase is not BLOCKED, HANDOFF, or MERGED. `NOT_REQUIRED` means the repository has no required CI checks; it is distinct from `UNKNOWN` or `PENDING`, and those statuses do not pass the gate. Changed HEAD clears CI evidence regardless of status.
 
-Passing the gate changes phase to MERGE_READY; a separate authorized operation changes it to MERGED.
+Passing the gate changes phase to MERGE_READY. A separately authorized operation would be required to merge.
+
+## Conversation registry
+
+conversation_registry.py stores one active Web ChatGPT conversation per workspace:
+
+- active: generation, URL, logical name, summary, and timestamps
+- previous[]: retained generations
+- work: current workspace, PR, HEAD, phase, tests, CI, and next action
+- history: bind, work update, and HANDOFF events
+
+Binding an existing URL starts G01 with default logical name `<workspace> · G01 · <summary>`. Successful HANDOFF increments the generation after the new URL and summary are known; failed HANDOFF does not replace the active URL. PR updates do not increment the generation.

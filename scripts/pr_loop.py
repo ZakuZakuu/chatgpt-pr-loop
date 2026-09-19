@@ -11,6 +11,7 @@ from pathlib import Path
 
 SHA = re.compile(r"^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$")
 DECISIONS = {"PLAN", "DONE", "BLOCKED", "CHANGES_REQUESTED", "APPROVE"}
+CI_STATUSES = {"PASS", "NOT_REQUIRED", "FAIL", "PENDING", "UNKNOWN"}
 
 def stamp():
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
@@ -32,7 +33,7 @@ def load(path):
     if not path.is_file():
         fail("state file does not exist: " + str(path))
     value = json.loads(path.read_text(encoding="utf-8"))
-    if value.get("schema") != 1:
+    if value.get("schema") != 2:
         fail("unsupported state schema")
     return value
 
@@ -54,13 +55,13 @@ def fresh(state):
 
 def new_state(args):
     return {
-        "schema": 1,
+        "schema": 2,
         "workspace": {"path": str(Path(args.workspace).resolve()), "name": args.workspace_name},
         "pr": {"number": int(args.pr), "url": args.url, "ref": args.ref},
         "head": {"sha": sha(args.head)},
         "phase": "IMPLEMENTING",
-        "tests": {"status": "UNKNOWN", "command": None, "summary": None, "recordedAt": None},
-        "ci": {"status": "UNKNOWN", "summary": None, "recordedAt": None},
+        "tests": {"status": "UNKNOWN", "headSha": None, "command": None, "summary": None, "recordedAt": None},
+        "ci": {"status": "UNKNOWN", "headSha": None, "summary": None, "recordedAt": None},
         "review": None,
         "handoff": None,
         "history": [{"at": stamp(), "event": "ADOPTED"}],
@@ -76,13 +77,14 @@ def review_sha_is_current(state, reviewed):
     return reviewed == state["head"]["sha"]
 
 def set_tests(state, status, command=None, summary=None):
-    state["tests"] = {"status": status.upper(), "command": command,
-                      "summary": summary, "recordedAt": stamp()}
+    state["tests"] = {"status": status.upper(), "headSha": state["head"]["sha"],
+                      "command": command, "summary": summary, "recordedAt": stamp()}
     state["phase"] = "TESTING"
     event(state, "TESTS_RECORDED", status=state["tests"]["status"])
 
 def set_ci(state, status, summary=None):
-    state["ci"] = {"status": status.upper(), "summary": summary, "recordedAt": stamp()}
+    state["ci"] = {"status": status.upper(), "headSha": state["head"]["sha"],
+                   "summary": summary, "recordedAt": stamp()}
     event(state, "CI_RECORDED", status=state["ci"]["status"])
 
 def apply_head(state, new):
@@ -93,19 +95,35 @@ def apply_head(state, new):
         return False
     state["head"] = {"sha": new}
     state["review"] = None
-    state["tests"] = {"status": "UNKNOWN", "command": None, "summary": None, "recordedAt": None}
-    state["ci"] = {"status": "UNKNOWN", "summary": None, "recordedAt": None}
+    state["tests"] = {"status": "UNKNOWN", "headSha": None, "command": None, "summary": None, "recordedAt": None}
+    state["ci"] = {"status": "UNKNOWN", "headSha": None, "summary": None, "recordedAt": None}
     state["phase"] = "TESTING"
     event(state, "HEAD_CHANGED", oldHeadSha=old, headSha=new)
     return True
 
 def apply_review(state, reviewed, decision, summary=None):
+    if state["phase"] != "AWAITING_REVIEW":
+        raise ValueError("record-review requires AWAITING_REVIEW")
+    if reviewed != state["head"]["sha"]:
+        raise ValueError("stale review: " + reviewed + "; current HEAD is " + state["head"]["sha"])
     decision = normalize_decision(decision)
     state["review"] = {"decision": decision, "reviewedSha": reviewed,
                        "summary": summary or "NONE", "recordedAt": stamp()}
     state["phase"] = {"PLAN": "CHANGES_REQUESTED", "DONE": "REVIEWED",
                       "BLOCKED": "BLOCKED"}[decision]
     event(state, "REVIEW_RECORDED", decision=decision, reviewedSha=reviewed)
+
+def adopt_existing_review(state, reviewed, decision, summary=None):
+    if state["phase"] not in {"IMPLEMENTING", "TESTING", "AWAITING_REVIEW"}:
+        raise ValueError("adopt-existing-review requires an active pre-fix phase")
+    if reviewed != state["head"]["sha"]:
+        raise ValueError("stale existing review: " + reviewed + "; current HEAD is " + state["head"]["sha"])
+    if decision.strip().upper() != "PLAN":
+        raise ValueError("adopt-existing-review requires decision PLAN")
+    state["review"] = {"decision": "PLAN", "reviewedSha": reviewed,
+                       "summary": summary or "NONE", "recordedAt": stamp()}
+    state["phase"] = "CHANGES_REQUESTED"
+    event(state, "EXISTING_REVIEW_ADOPTED", decision="PLAN", reviewedSha=reviewed)
 
 def start_fix(state):
     if state["phase"] != "CHANGES_REQUESTED":
@@ -137,12 +155,16 @@ def resume_state(state, current_head):
         event(state, "RESUMED", headSha=new)
     state["handoff"] = None
 
+def ci_satisfied(state):
+    return (state["ci"]["status"] in {"PASS", "NOT_REQUIRED"}
+            and state["ci"].get("headSha") == state["head"]["sha"])
+
 def gate_reasons(state):
     reasons = []
-    if state["tests"]["status"] != "PASS":
-        reasons.append("tests are not PASS")
-    if state["ci"]["status"] != "PASS":
-        reasons.append("CI is not PASS")
+    if state["tests"]["status"] != "PASS" or state["tests"].get("headSha") != state["head"]["sha"]:
+        reasons.append("tests are not PASS for current HEAD")
+    if not ci_satisfied(state):
+        reasons.append("CI is not PASS or NOT_REQUIRED for current HEAD")
     if not fresh(state):
         reasons.append("review SHA or decision is stale")
     if state["phase"] in {"BLOCKED", "HANDOFF", "MERGED"}:
@@ -181,18 +203,18 @@ def cmd_tests(a):
 def cmd_ci(a):
     value = load(Path(a.state))
     status = a.status.upper()
-    if status not in {"PASS", "FAIL", "PENDING", "UNKNOWN"}:
-        fail("CI status must be PASS, FAIL, PENDING, or UNKNOWN")
+    if status not in CI_STATUSES:
+        fail("CI status must be PASS, NOT_REQUIRED, FAIL, PENDING, or UNKNOWN")
     set_ci(value, status, a.summary)
     save(Path(a.state), value)
     emit({"ok": True, "state": value})
 
 def request_review_state(state, ci_status="PENDING", ci_summary=None):
-    if state["tests"]["status"] != "PASS":
-        raise ValueError("tests must be PASS before review")
+    if state["tests"]["status"] != "PASS" or state["tests"]["headSha"] != state["head"]["sha"]:
+        raise ValueError("tests must be PASS for current HEAD before review")
     ci_status = ci_status.upper()
-    if ci_status not in {"PASS", "FAIL", "PENDING", "UNKNOWN"}:
-        raise ValueError("CI status must be PASS, FAIL, PENDING, or UNKNOWN")
+    if ci_status not in CI_STATUSES:
+        raise ValueError("CI status must be PASS, NOT_REQUIRED, FAIL, PENDING, or UNKNOWN")
     set_ci(state, ci_status, ci_summary)
     state["review"] = None
     state["phase"] = "AWAITING_REVIEW"
@@ -236,6 +258,15 @@ def cmd_review(a):
     apply_review(value, reviewed, a.decision, a.summary)
     save(Path(a.state), value)
     emit({"ok": True, "reviewFresh": fresh(value), "state": value})
+
+def cmd_adopt_existing_review(a):
+    value = load(Path(a.state))
+    try:
+        adopt_existing_review(value, sha(a.reviewed_sha), a.decision, a.summary)
+    except ValueError as error:
+        fail(str(error))
+    save(Path(a.state), value)
+    emit({"ok": True, "reviewCurrent": True, "state": value})
 
 def cmd_fix(a):
     value = load(Path(a.state))
@@ -297,13 +328,25 @@ def cmd_dry(a):
                    "pass": value["phase"] == "AWAITING_REVIEW"})
     apply_review(value, old, "PLAN", "one fake fix")
     checks.append({"name": "plan_enters_fix_path", "pass": value["phase"] == "CHANGES_REQUESTED"})
+
+    takeover = new_state(fake)
+    takeover_stale_rejected = False
+    try:
+        adopt_existing_review(takeover, new, "PLAN", "existing plan")
+    except ValueError:
+        takeover_stale_rejected = True
+    adopt_existing_review(takeover, old, "PLAN", "existing plan")
+    start_fix(takeover)
+    checks.append({"name": "existing_plan_takeover_enters_fix_path",
+                   "pass": takeover_stale_rejected and takeover["phase"] == "FIXING"
+                   and takeover["review"]["reviewedSha"] == old})
     start_fix(value)
     checks.append({"name": "plan_to_fixing", "pass": value["phase"] == "FIXING"})
 
     apply_head(value, new)
     checks.append({"name": "changed_head_invalidates_state",
-                   "pass": value["review"] is None and value["tests"]["status"] == "UNKNOWN"
-                   and value["ci"]["status"] == "UNKNOWN"})
+                   "pass": value["review"] is None and value["tests"]["status"] == "UNKNOWN" and value["tests"]["headSha"] is None
+                   and value["ci"]["status"] == "UNKNOWN" and value["ci"]["headSha"] is None})
     checks.append({"name": "stale_review_rejected",
                    "pass": not review_sha_is_current(value, old)})
 
@@ -314,8 +357,19 @@ def cmd_dry(a):
     set_ci(value, "FAIL", "intentional CI failure")
     allowed, reasons = run_gate(value)
     checks.append({"name": "gate_rejects_failed_checks",
-                   "pass": not allowed and "tests are not PASS" in reasons
-                   and "CI is not PASS" in reasons})
+                   "pass": not allowed and "tests are not PASS for current HEAD" in reasons
+                   and "CI is not PASS or NOT_REQUIRED for current HEAD" in reasons})
+
+    no_ci = new_state(fake)
+    set_tests(no_ci, "PASS", "fake-tests", "green without required CI")
+    request_review_state(no_ci, "NOT_REQUIRED", "no required GitHub CI checks")
+    apply_review(no_ci, old, "DONE", "fake approval")
+    allowed, reasons = run_gate(no_ci)
+    checks.append({"name": "not_required_ci_satisfies_gate",
+                   "pass": allowed and not reasons and no_ci["ci"]["status"] == "NOT_REQUIRED"})
+    apply_head(no_ci, new)
+    checks.append({"name": "changed_head_invalidates_not_required_ci",
+                   "pass": no_ci["ci"]["status"] == "UNKNOWN" and no_ci["ci"]["headSha"] is None})
 
     set_tests(value, "PASS", "fake-tests", "green")
     set_ci(value, "PASS", "green")
@@ -343,7 +397,7 @@ def parser():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--state", required=True)
     sub = parser.add_subparsers(dest="cmd", required=True)
-    init = sub.add_parser("init")
+    init = sub.add_parser("init", aliases=["adopt"])
     init.add_argument("--pr", required=True)
     init.add_argument("--head", required=True)
     init.add_argument("--workspace", default=".")
@@ -374,6 +428,11 @@ def parser():
     review.add_argument("--decision", required=True)
     review.add_argument("--summary")
     review.set_defaults(fn=cmd_review)
+    takeover = sub.add_parser("adopt-existing-review")
+    takeover.add_argument("--reviewed-sha", "--head", dest="reviewed_sha", required=True)
+    takeover.add_argument("--decision", required=True)
+    takeover.add_argument("--summary")
+    takeover.set_defaults(fn=cmd_adopt_existing_review)
     handoff = sub.add_parser("handoff")
     handoff.add_argument("--next-action", required=True)
     handoff.set_defaults(fn=cmd_handoff)
