@@ -50,6 +50,19 @@ The default logical name is `<workspace> · G<NN> · <short summary>`. Binding s
 
 Bind an existing ChatGPT URL to G01, update work across PRs without changing generation, and use the registry handoff command only after a new conversation has acknowledged the structured handoff. Failed handoff keeps the old active URL.
 
+## Remote GPT contract
+
+Codex and remote Web ChatGPT use two views of the same workflow:
+
+- local Codex: `SKILL.md`
+- remote GPT: `references/remote-gpt-contract.md`
+
+A newly created GPT generation is bootstrapped with a structured HANDOFF message containing the contract repository/path/ref plus the current repo, PR, exact HEAD, phase, tests/CI, last review, known issues, and next action. The remote GPT must read the contract through the GitHub connector before takeover is considered successful.
+
+The contract explicitly defines C2C as message grammar/transport metadata, not a connector that remote GPT should request. Normal code review uses GitHub and the exact remote PR HEAD; MCP/bridge/tunnel/local-workspace access remain optional.
+
+The local registry switches G01 -> G02 only after the new conversation has loaded the contract and acknowledged the handoff. If takeover fails, the previous generation remains active.
+
 ## IAB recovery
 
 If ChatGPT remains visible but Codex loses browser control (for example `nodeRepl.fetch request failed` after sleep/resume), treat it as a stale IAB runtime/handle before treating it as a lost conversation:
