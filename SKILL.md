@@ -11,7 +11,7 @@ This is the PR workflow layer. It does not replace or edit the upstream codex-wi
 
 The control plane is one local Codex session talking to one active Web ChatGPT conversation through the existing IAB transport. The data plane is the GitHub repository and pull request. GitHub is the formal source for the PR diff, remote branch, exact HEAD, checks, and review.
 
-The upstream C2C skill owns IAB message transport, long-chat continuity, checkpoints, and HANDOFF/new-chat transport. This skill owns PR adoption, SHA verification, test and CI evidence, the review/fix loop, conversation lineage metadata, and the local merge gate.
+The upstream C2C skill owns local IAB message transport, long-chat continuity, checkpoints, and HANDOFF/new-chat transport. This skill owns PR adoption, SHA verification, test and CI evidence, the review/fix loop, conversation lineage metadata, the remote-GPT collaboration contract, and the local merge gate. `C2C` is a message envelope/transport concept; remote GPT must not be instructed to call a "C2C connector" for normal review.
 
 MCP workspace access, a C2C bridge, a tunnel, OAuth pairing, and a doctor check are optional integrations. Their absence must not prevent local PR state work or GitHub-based review. Do not modify upstream C2C.
 
@@ -28,6 +28,54 @@ Use a user-level registry at ~/.codex/chatgpt-pr-loop/<workspace>/state.json. It
 Bind an existing URL with scripts/conversation_registry.py bind; this starts G01 and does not require a new chat. Update work when moving between PRs without changing generation. A successful HANDOFF creates the next generation only after the new URL exists, the structured handoff is sent, and the new conversation acknowledges the current workspace and task. A failed handoff leaves the old active URL unchanged.
 
 The default is one Codex session and one active Web ChatGPT conversation. A generation may cover multiple tasks and PRs. Create a new generation only for a long, lost, stale, or explicitly replaced conversation.
+
+## Remote GPT contract and session bootstrap
+
+The remote Web ChatGPT side does not automatically see this local skill. Give it a shared GitHub-readable contract:
+
+- repository: `ZakuZakuu/chatgpt-pr-loop`
+- path: `references/remote-gpt-contract.md`
+- ref: `main`
+
+For every newly created GPT generation, including a brand-new G01 when practical and every G<NN> HANDOFF, the first substantive message must point to that contract and require the remote GPT to read it through the GitHub connector before continuing. Do not paste the entire local SKILL.md into the chat.
+
+Use this standard bootstrap/HANDOFF envelope:
+
+```text
+[C2C]
+STATE: HANDOFF
+
+SESSION: <workspace · GNN · short summary>
+PREVIOUS_SESSION: <previous logical name or NONE>
+
+CONTRACT_REPOSITORY: ZakuZakuu/chatgpt-pr-loop
+CONTRACT_PATH: references/remote-gpt-contract.md
+CONTRACT_REF: main
+
+REPOSITORY: <owner/repo>
+ORIGINAL_GOAL: <durable project/stage goal>
+PROGRESS: <concise completed work>
+CURRENT_TASK: <current task>
+PR_NUMBER: <number or NONE>
+HEAD_SHA: <exact full remote SHA or NONE>
+PHASE: <current workflow phase>
+TESTS: <current-head test status/summary>
+CI: <current-head CI status/summary>
+LAST_REVIEW: <PLAN/DONE/BLOCKED/NONE>
+REVIEWED_SHA: <exact SHA or NONE>
+KNOWN_ISSUES: <concise blockers/constraints or NONE>
+NEXT_EXPECTED_STEP: <what the new GPT should do next>
+
+INSTRUCTIONS:
+1. First read the remote GPT contract from GitHub using the repository/path/ref above.
+2. Treat GitHub PR + exact remote HEAD as the source of truth for code review.
+3. C2C is the message envelope/transport, not a connector you should request.
+4. Do not require MCP, a C2C connector, bridge, tunnel, or local workspace access for normal review.
+5. Do not restart completed work; continue from the state above.
+6. Acknowledge takeover with [C2C] STATE: HANDOFF, HANDOFF_STATUS: ACCEPTED, CONTRACT: LOADED, current PR/HEAD/phase, and NEXT_EXPECTED_STEP.
+```
+
+Do not swap the registry active URL/generation until the new conversation has loaded the contract and returned a coherent HANDOFF acknowledgement for the current workspace/task. If GitHub access is unavailable, keep the old generation active and treat takeover as failed/BLOCKED rather than silently proceeding under a different protocol.
 
 ## PR state and invariants
 
@@ -48,7 +96,7 @@ A normal review is accepted only from AWAITING_REVIEW and only when REVIEWED_SHA
 5. Record PLAN, DONE, or BLOCKED with REVIEWED_SHA and comments. Reject stale SHA or wrong-phase results.
 6. For PLAN, continue fixing without asking the user, then repeat from step 2.
 7. For DONE, refresh remote HEAD and evidence, then run the local merge gate.
-8. If the conversation is too long or unavailable, use the upstream C2C HANDOFF envelope with PR, full HEAD, phase, tests, CI, review SHA, and next action. Swap the registry URL only after successful takeover.
+8. If the conversation is too long or unavailable, create the next GPT generation and send the standard contract-aware HANDOFF/bootstrap envelope above. Swap the registry URL only after the new GPT has read `references/remote-gpt-contract.md` and acknowledged the current workspace/task.
 9. Stop for product decisions, permissions, missing authorization, or genuine blockers.
 
 ## IAB/browser runtime recovery
