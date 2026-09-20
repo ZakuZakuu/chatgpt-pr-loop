@@ -57,6 +57,9 @@ If ChatGPT remains visible but Codex loses browser control (for example `nodeRep
 - preserve the active conversation URL and current PR/HEAD state;
 - do not HANDOFF, increment generation, rebuild MCP/tunnels, or create a new GPT conversation;
 - abandon the stale handle, acquire a fresh IAB browser/tab, and open the exact stored conversation URL;
+- treat create/open/bind timeouts as an unknown outcome: wait for loading, re-enumerate tabs, and reuse an exact-URL tab that may already have been created instead of resetting immediately or creating duplicates;
+- avoid resetting CUA on the first navigation timeout because the page may already be loaded while only the RPC response timed out; if reset happened, rebind the surviving exact-URL tab;
+- wait for slow page load or a specific human-verification/login step before declaring recovery failed;
 - check whether the pending exact-HEAD request is already present before resending it;
 - continue the same review loop once the fresh tab is controllable;
 - ask for a Desktop restart or manual relay only after fresh-tab recovery also fails.
