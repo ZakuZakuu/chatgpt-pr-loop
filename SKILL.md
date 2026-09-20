@@ -60,13 +60,22 @@ Before asking the user to refresh, restart Desktop, create a new conversation, o
 1. Preserve the current workspace registry, active conversation URL, generation, PR number, exact HEAD SHA, tests, CI, review state, and pending action. Do not change PR phase because of an IAB outage.
 2. Do not HANDOFF and do not increment G<NN>. Opening the same conversation URL in a fresh browser or tab is still the same conversation generation.
 3. Stop retrying a known-stale browser/tab handle. Reacquire IAB; if needed, create a fresh IAB browser/tab and navigate directly to the registry's exact active conversation URL.
-4. Verify that the fresh tab is on the expected ChatGPT conversation and that the page/composer is controllable. Prefer the stored conversation URL over search, history guessing, or creating a new chat.
-5. Before sending anything, determine whether the pending exact-HEAD request was already submitted:
+4. Treat browser command timeouts as **unknown outcome**, not immediate failure. A create-tab, open-URL, navigation, or bind call may time out after the browser has already completed the action. After such a timeout:
+   - do not immediately reset CUA/browser state;
+   - wait a reasonable page-load grace period;
+   - re-enumerate tabs once and look for the exact stored conversation URL;
+   - if one or more matching tabs exist, reuse a single matching tab and stop creating more duplicates;
+   - rebind that tab and verify control with a lightweight read such as URL/title/accessibility state before clicking or typing.
+   Only after reconciliation confirms that no usable matching tab exists should a new tab be created.
+5. Prefer preserving a live control session over resetting it on the first navigation timeout. A reset can discard the mouse/control handle even when the page itself loaded successfully. If a reset did occur, re-enumerate the surviving tabs and rebind the existing exact-URL tab before creating another.
+6. Allow ChatGPT to finish loading before declaring bind/control failure. If the page visibly loads slowly, a login check, human verification, or conversation selection is blocking progress, wait for completion or ask the user only for that specific interactive step; do not restart the whole recovery flow.
+7. Verify that the fresh/rebound tab is on the expected ChatGPT conversation and that the page/composer is controllable. Prefer the stored conversation URL over search, history guessing, or creating a new chat.
+8. Before sending anything, determine whether the pending exact-HEAD request was already submitted:
    - if submission definitely never happened, send it once;
    - if submission status is uncertain, inspect the reopened conversation for the task/PR/HEAD marker first;
    - if the request is already present, do not send a duplicate.
-6. Continue the existing review loop from the preserved state. Do not recreate connectors, rebuild tunnels, rerun unrelated work, open a replacement PR, or invalidate same-HEAD evidence.
-7. Only if a fresh IAB handle/tab opened on the exact existing conversation URL still cannot be controlled should the workflow fall back to one user-assisted Desktop restart/manual relay. Do not repeatedly ask the user to refresh or restart without first trying the fresh-tab recovery.
+9. Continue the existing review loop from the preserved state. Do not recreate connectors, rebuild tunnels, rerun unrelated work, open a replacement PR, or invalidate same-HEAD evidence.
+10. Only if a fresh IAB handle/tab opened on the exact existing conversation URL still cannot be controlled should the workflow fall back to one user-assisted Desktop restart/manual relay. Do not repeatedly ask the user to refresh or restart without first trying the fresh-tab recovery.
 
 A browser runtime outage is a transport incident, not a reason to abandon the active GPT conversation. Conversation rollover is reserved for genuine context/URL failure under the normal HANDOFF rules.
 
