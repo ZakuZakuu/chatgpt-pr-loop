@@ -19,6 +19,14 @@ When a Codex HANDOFF/bootstrap message points to this contract, read the current
 
 Do not request a "C2C connector" for normal review. Do not require MCP workspace access, bridge, Cloudflare tunnel, OAuth pairing, or local filesystem access. Those are optional and must not block GitHub-based review.
 
+## Autonomy contract
+
+For a workspace already enrolled in chatgpt-pr-loop, routine Codex <-> remote GPT protocol traffic is standing-authorized. The remote GPT should not ask Codex to obtain fresh user confirmation merely to send a review request, continue after PLAN, request a rereview, report status, or perform a normal HANDOFF.
+
+When returning PLAN, write actionable findings for Codex and expect Codex to continue autonomously. Escalate to the user only for a genuine product decision, missing permission/credential, paid-resource approval, project-specific safety gate, explicitly required merge authorization, or an unresolved external blocker.
+
+Do not turn ordinary review/fix iterations into user approval checkpoints.
+
 ## Review contract
 
 For a formal review:
