@@ -77,6 +77,36 @@ INSTRUCTIONS:
 
 Do not swap the registry active URL/generation until the new conversation has loaded the contract and returned a coherent HANDOFF acknowledgement for the current workspace/task. If GitHub access is unavailable, keep the old generation active and treat takeover as failed/BLOCKED rather than silently proceeding under a different protocol.
 
+## Standing authorization and autonomy
+
+Once a workspace is enrolled in chatgpt-pr-loop and an active GPT conversation is bound, routine actions required to advance the existing workflow are standing-authorized. Do **not** stop to ask the user for confirmation before each normal step.
+
+Standing authorization includes:
+
+- sending exact-HEAD review requests to the already-bound GPT conversation;
+- sending follow-up/status/protocol messages required by the current task;
+- receiving PLAN and immediately continuing routine fixes;
+- running ordinary project tests and targeted validation already implied by the task;
+- committing and pushing routine fixes to the current working branch/PR;
+- rereading the remote PR HEAD and checks;
+- requesting rereview after a changed HEAD;
+- recording PLAN/DONE/BLOCKED results in local state;
+- recovering IAB/browser transport and resuming a message that was definitely not sent;
+- creating the next GPT generation and sending the standard HANDOFF when normal rollover criteria are met.
+
+Do not treat "send this message to the already-bound GPT conversation" as a new permission boundary. Do not ask "shall I send the review request?", "shall I continue?", or equivalent questions during the normal PLAN -> fix -> test -> push -> rereview loop.
+
+Pause for the user only when a genuine decision or authorization boundary is reached, such as:
+
+- product/requirements choices with materially different outcomes;
+- missing credentials, permissions, account connections, or paid-resource approval;
+- destructive/high-risk external actions not already authorized;
+- physical hardware motion, flashing/execution, or other project-specific safety gates requiring human presence/confirmation;
+- merge when the repository/workspace policy requires explicit merge authorization;
+- an unresolved blocker that cannot be handled autonomously.
+
+A transport problem is not a permission boundary. A routine code-review finding is not a user blocker. Prefer continuing autonomously and notifying the user only at meaningful milestones or genuine blockers.
+
 ## PR state and invariants
 
 IMPLEMENTING -> TESTING -> AWAITING_REVIEW -> CHANGES_REQUESTED -> FIXING -> TESTING -> AWAITING_REVIEW -> REVIEWED -> MERGE_READY.
@@ -92,7 +122,7 @@ A normal review is accepted only from AWAITING_REVIEW and only when REVIEWED_SHA
 1. Adopt the current PR, workspace, existing plan, and current remote HEAD. If an existing PLAN already has REVIEWED_SHA equal to that HEAD, use `adopt-existing-review` and continue at CHANGES_REQUESTED instead of requesting a duplicate review.
 2. Implement or continue the requested work, run tests, and record evidence.
 3. Commit and push; reread the exact remote HEAD.
-4. Ask ChatGPT to review the GitHub PR at that exact SHA using the GitHub app/connector.
+4. Ask ChatGPT to review the GitHub PR at that exact SHA using the GitHub app/connector immediately; this routine message is standing-authorized and must not require user confirmation.
 5. Record PLAN, DONE, or BLOCKED with REVIEWED_SHA and comments. Reject stale SHA or wrong-phase results.
 6. For PLAN, continue fixing without asking the user, then repeat from step 2.
 7. For DONE, refresh remote HEAD and evidence, then run the local merge gate.

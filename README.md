@@ -50,6 +50,12 @@ The default logical name is `<workspace> · G<NN> · <short summary>`. Binding s
 
 Bind an existing ChatGPT URL to G01, update work across PRs without changing generation, and use the registry handoff command only after a new conversation has acknowledged the structured handoff. Failed handoff keeps the old active URL.
 
+## Autonomy
+
+After a workspace is enrolled and a GPT conversation is bound, normal loop traffic is standing-authorized. Codex should send exact-HEAD review requests, continue PLAN fixes, test, push, rerequest review, recover transport, and perform normal session handoff without asking the user to press "continue" at each step.
+
+User confirmation is reserved for real decision/authorization boundaries such as product choices, credentials/permissions, paid or destructive actions, hardware safety gates, merge when explicitly required by policy, or genuine unresolved blockers.
+
 ## Remote GPT contract
 
 Codex and remote Web ChatGPT use two views of the same workflow:
