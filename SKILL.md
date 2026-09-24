@@ -15,6 +15,41 @@ The upstream C2C skill owns local IAB message transport, long-chat continuity, c
 
 MCP workspace access, a C2C bridge, a tunnel, OAuth pairing, and a doctor check are optional integrations. Their absence must not prevent local PR state work or GitHub-based review. Do not modify upstream C2C.
 
+## Upstream C2C dependency bootstrap
+
+Canonical upstream repository:
+
+- `https://github.com/XiaoDuoYa/codex-with-chatgpt`
+
+chatgpt-pr-loop reuses the upstream skill's IAB/browser transport and HANDOFF semantics, but normal PR review in this project uses GitHub rather than the upstream read-only MCP connector.
+
+On first activation of this skill, and before using its workflow on a machine where the upstream skill may be missing, verify the upstream installation:
+
+```text
+python3 <chatgpt-pr-loop-root>/scripts/bootstrap_upstream.py --check
+```
+
+If `checkoutPresent` or `skillPresent` is false, or the user explicitly asks to install/update chatgpt-pr-loop, run:
+
+```text
+python3 <chatgpt-pr-loop-root>/scripts/bootstrap_upstream.py
+```
+
+Use the current Python 3 executable on platforms where it is named `python` rather than `python3`.
+
+The helper:
+
+- clones/updates `XiaoDuoYa/codex-with-chatgpt` under `~/.codex/vendor/codex-with-chatgpt`;
+- refuses to overwrite an upstream checkout with local changes or an unexpected origin;
+- requires git and Node.js >= 20 plus corepack;
+- runs `corepack pnpm install` and `corepack pnpm build`;
+- installs the upstream `skill/SKILL.md` to `~/.codex/skills/codex-with-chatgpt/SKILL.md`;
+- replaces the upstream `<ACTUAL_CHECKOUT_PATH>` placeholder with the real checkout path.
+
+When the user explicitly asks to install/setup this skill and prerequisites are missing, Codex may install git/Node.js >= 20/corepack using the platform's standard package manager, then rerun the helper. Otherwise surface the missing prerequisite instead of silently changing system packages.
+
+**Do not run `c2c setup` automatically for chatgpt-pr-loop.** Upstream `c2c setup` configures its legacy MCP/Cloudflare/ChatGPT connector path, which is optional here. Run it only if the user explicitly asks to enable the upstream read-only MCP workflow. Existing upstream C2C setups must be preserved.
+
 ## Conversation lineage
 
 Use a user-level registry at ~/.codex/chatgpt-pr-loop/<workspace>/state.json. It stores one active conversation and retained previous generations:
@@ -184,5 +219,6 @@ Validate with:
 
     python3 -m unittest discover -s tests -v
     python3 scripts/pr_loop.py --state /tmp/pr-loop-dry.json dry-run
+    python3 scripts/bootstrap_upstream.py --check
 
 Never store credentials, cookies, pairing codes, OAuth data, tunnel hosts, or full local secret configuration in repository state.
