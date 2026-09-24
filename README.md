@@ -6,15 +6,72 @@ chatgpt-pr-loop is a small PR workflow layer for codex-with-chatgpt v2. It coord
 
 The upstream C2C layer remains responsible for IAB messaging, long-chat continuity, checkpoints, and HANDOFF transport. This project owns PR adoption, exact remote SHA verification, test and CI evidence, the review/fix loop, and the merge gate.
 
+Upstream dependency: `XiaoDuoYa/codex-with-chatgpt`
+(https://github.com/XiaoDuoYa/codex-with-chatgpt).
+
+chatgpt-pr-loop can bootstrap that upstream checkout and user-level skill automatically. It does **not** enable the upstream MCP/Cloudflare connector path unless you explicitly ask for it.
+
 The control plane is Codex to one active Web ChatGPT conversation. The data plane is the GitHub repository and PR. MCP workspace access, a bridge, a tunnel, OAuth pairing, and doctor checks are optional integrations, not workflow prerequisites. Formal review uses the GitHub repository and exact PR HEAD.
 
 ## Install
 
-Copy this directory to:
+### Recommended: one repository link
 
-    ~/.codex/skills/chatgpt-pr-loop/
+Give Codex this repository:
 
-No package or additional runtime dependency is needed.
+`https://github.com/ZakuZakuu/chatgpt-pr-loop`
+
+and ask it:
+
+```text
+Install/update chatgpt-pr-loop as a user-level Codex skill and prepare its upstream dependency.
+
+1. Clone/update ZakuZakuu/chatgpt-pr-loop into ~/.codex/skills/chatgpt-pr-loop.
+2. Run its scripts/bootstrap_upstream.py helper.
+3. If git or Node.js >= 20/corepack is missing, install the missing prerequisite with the platform's normal package manager, then retry.
+4. Verify bootstrap_upstream.py --check, the local unit tests, and the PR-loop dry-run.
+5. Do not run c2c setup and do not create MCP/Cloudflare/ChatGPT connectors unless I explicitly ask for the upstream legacy MCP workflow.
+6. Do not modify project repositories while installing these user-level skills.
+```
+
+The bootstrap helper installs/updates the upstream project at:
+
+```text
+~/.codex/vendor/codex-with-chatgpt/
+```
+
+and installs its user-level skill at:
+
+```text
+~/.codex/skills/codex-with-chatgpt/SKILL.md
+```
+
+It also patches the upstream skill's required checkout-path placeholder and builds the upstream TypeScript project.
+
+### Manual
+
+Clone this repository into:
+
+```text
+~/.codex/skills/chatgpt-pr-loop/
+```
+
+Then run:
+
+```bash
+python3 ~/.codex/skills/chatgpt-pr-loop/scripts/bootstrap_upstream.py
+python3 ~/.codex/skills/chatgpt-pr-loop/scripts/bootstrap_upstream.py --check
+```
+
+On Windows, use the available Python 3 command if it is named `python`.
+
+The helper is conservative: it will not overwrite a dirty upstream checkout or an unexpected git origin.
+
+### Optional upstream MCP setup
+
+Normal chatgpt-pr-loop review uses GitHub as the data plane, so no C2C bridge/tunnel/connector is required.
+
+If you specifically want the original upstream read-only MCP workflow, follow the upstream `codex-with-chatgpt` setup separately. chatgpt-pr-loop never runs `c2c setup` automatically.
 
 ## Use
 
@@ -89,5 +146,6 @@ Opening the same conversation in a fresh tab is transport recovery, not a new co
 
     python3 -m unittest discover -s tests -v
     python3 scripts/pr_loop.py --state /tmp/pr-loop-dry.json dry-run
+    python3 scripts/bootstrap_upstream.py --check
 
 The scripts are dependency-free and have no network, push, merge, or ChatGPT side effects.
